@@ -1,0 +1,5 @@
+config.json
+data.singer
+properties.json
+tap/
+tap_cursor.egg-info/

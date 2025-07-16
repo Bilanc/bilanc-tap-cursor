@@ -1,0 +1,150 @@
+{
+    "type": "object",
+    "properties": {
+      "date": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "email": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "format": "email"
+      },
+      "isActive": {
+        "type": [
+          "boolean",
+          "null"
+        ]
+      },
+      "totalLinesAdded": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "totalLinesDeleted": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "acceptedLinesAdded": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "acceptedLinesDeleted": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "totalApplies": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "totalAccepts": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "totalRejects": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "totalTabsShown": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "totalTabsAccepted": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "composerRequests": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "chatRequests": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "agentRequests": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "cmdkUsages": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "subscriptionIncludedReqs": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "apiKeyReqs": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "usageBasedReqs": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "bugbotUsages": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "mostUsedModel": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "applyMostUsedExtension": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "tabMostUsedExtension": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "clientVersion": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    }
+}
