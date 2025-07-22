@@ -314,9 +314,12 @@ def main():
     args = singer.utils.parse_args(REQUIRED_CONFIG_KEYS)
 
     if not args.config.get("api_key"):
-        raise BadCredentialsException(
-            "No API key provided."
-        )
+        if os.getenv("CURSOR_API_KEY") is not None:
+            args.config["api_key"] = os.getenv("CURSOR_API_KEY")
+        else:
+            raise BadCredentialsException(
+                "No API key provided."
+            )
     
     if args.discover:
         do_discover(args.config)
