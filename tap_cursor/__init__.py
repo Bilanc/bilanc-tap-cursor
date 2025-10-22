@@ -5,7 +5,6 @@ import requests
 import singer
 import argparse
 from singer import bookmarks, metrics, metadata
-import datetime
 
 session = requests.Session()
 logger = singer.get_logger()
