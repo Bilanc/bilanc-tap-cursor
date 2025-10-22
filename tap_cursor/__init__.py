@@ -1,17 +1,11 @@
 import os
 import json
 import collections
-import time
 import requests
-import backoff
 import singer
-import math
 import argparse
-from datetime import datetime, timedelta
-import pytz
 from singer import bookmarks, metrics, metadata
-from simplejson import JSONDecodeError
-import re
+import datetime
 
 session = requests.Session()
 logger = singer.get_logger()
@@ -183,7 +177,7 @@ def get_daily_usage(schema, state, mdata, start_date):
         state, "daily_usage", "since", start_date
     )
     if bookmark_value:
-        bookmark_time = singer.utils.strptime_to_utc(bookmark_value)
+        bookmark_time = singer.utils.strptime_to_utc(bookmark_value).replace(hour=0, minute=0, second=0, microsecond=0)
     else:
         bookmark_time = 0
 
@@ -193,7 +187,7 @@ def get_daily_usage(schema, state, mdata, start_date):
         for response in authed_get_all_pages(
             "daily_usage",
             f"{BASE_URL}/teams/daily-usage-data",
-            start_date=bookmark_time
+            start_date=bookmark_time,
         ):
             daily_usages = response.json()["data"]
             extraction_time = singer.utils.now()
