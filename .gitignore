@@ -3,3 +3,7 @@ data.singer
 properties.json
 tap/
 tap_cursor.egg-info/
+venv/
+catalog.json
+full_output.txt
+__pycache__/

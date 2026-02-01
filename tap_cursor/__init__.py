@@ -19,6 +19,7 @@ REQUIRED_CONFIG_KEYS = ["start_date"]
 
 KEY_PROPERTIES = {
     "daily_usage": ["date", "email"],
+    "usage_events": ["timestamp", "userEmail"],
 }
 
 SUB_STREAMS = {}
@@ -149,49 +150,19 @@ def get_request_timeout():
     return REQUEST_TIMEOUT
 
 
-def authed_get(source, url, headers={}, start_date=0, end_date=None):
+def authed_post(source, url, body, headers={}):
+    """
+    Make a POST request with JSON body.
+    """
     with metrics.http_request_timer(source) as timer:
-        epoch_start_time = int(start_date.timestamp() * 1000)
-        epoch_end_time = int(end_date.timestamp() * 1000)
         session.headers.update(headers)
-        logger.info("Making request to %s", url)
-        resp = session.request(method="post", json={"startDate": epoch_start_time, "endDate": epoch_end_time}, url=url, timeout=get_request_timeout())
+        logger.info("Making POST request to %s", url)
+        resp = session.request(method="post", json=body, url=url, timeout=get_request_timeout())
         logger.info("Request received status code %s", resp.status_code)
         timer.tags[metrics.Tag.http_status_code] = resp.status_code
         if resp.status_code in [404, 409]:
-            # return an empty response body since we're not raising a NotFoundException
             resp._content = b"{}"  # pylint: disable=protected-access
         return resp
-
-
-def authed_get_all_pages(source, url, headers={}, start_date=0):
-    
-    # Convert start_date to datetime if it's not already
-    if isinstance(start_date, (int, float)):
-        current_start = datetime.fromtimestamp(start_date)
-    else:
-        current_start = start_date
-    
-    # Ensure both datetimes are timezone-naive for comparison
-    if hasattr(current_start, 'tzinfo') and current_start.tzinfo is not None:
-        current_start = current_start.replace(tzinfo=None)
-    
-    current_date = datetime.now()
-    
-    # Iterate through 30-day chunks
-    while current_start < current_date:
-        # Calculate end date (30 days from current_start or current_date, whichever is earlier)
-        chunk_end = min(current_start + timedelta(days=29), current_date)
-
-        logger.info(current_start)
-        
-        # Make request for this chunk
-        r = authed_get(source, url, headers, current_start, chunk_end)
-        yield r
-
-        
-        # Move to next chunk
-        current_start = chunk_end
 
 
 def get_daily_usage(schema, state, mdata, start_date):
@@ -199,20 +170,40 @@ def get_daily_usage(schema, state, mdata, start_date):
         state, "daily_usage", "since", start_date
     )
     if bookmark_value:
-        bookmark_time = singer.utils.strptime_to_utc(bookmark_value).replace(hour=0, minute=0, second=0, microsecond=0)
+        current_start = singer.utils.strptime_to_utc(bookmark_value).replace(hour=0, minute=0, second=0, microsecond=0)
     else:
-        bookmark_time = 0
+        current_start = singer.utils.strptime_to_utc(start_date).replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # Ensure timezone-naive for comparison
+    if hasattr(current_start, 'tzinfo') and current_start.tzinfo is not None:
+        current_start = current_start.replace(tzinfo=None)
+    
+    current_date = datetime.now()
 
     with metrics.record_counter(
         "daily_usage",
     ) as counter:
-        for response in authed_get_all_pages(
-            "daily_usage",
-            f"{BASE_URL}/teams/daily-usage-data",
-            start_date=bookmark_time,
-        ):
-            daily_usages = response.json()["data"]
+        # Iterate through 30-day chunks
+        while current_start < current_date:
+            chunk_end = min(current_start + timedelta(days=29), current_date)
+            
+            logger.info(f"Fetching daily usage from {current_start} to {chunk_end}")
+            
+            body = {
+                "startDate": int(current_start.timestamp() * 1000),
+                "endDate": int(chunk_end.timestamp() * 1000)
+            }
+            
+            response = authed_post("daily_usage", f"{BASE_URL}/teams/daily-usage-data", body)
+            
+            if response.status_code != 200:
+                logger.error(f"Failed to fetch daily usage: {response.status_code}")
+                current_start = chunk_end
+                continue
+                
+            daily_usages = response.json().get("data", [])
             extraction_time = singer.utils.now()
+            
             for daily_usage in daily_usages:
                 # Add inserted_at timestamp
                 daily_usage['inserted_at'] = singer.utils.strftime(extraction_time)
@@ -236,6 +227,101 @@ def get_daily_usage(schema, state, mdata, start_date):
                     singer.utils.strftime(extraction_time),
                 )
                 counter.increment()
+            
+            # Move to next chunk
+            current_start = chunk_end
+            
+        return state
+
+
+def get_usage_events(schema, state, mdata, start_date):
+    """
+    Fetch usage events from the Cursor API with pagination support.
+    Iterates through 30-day chunks and handles page-based pagination.
+    """
+    bookmark_value = get_bookmark(
+        state, "usage_events", "since", start_date
+    )
+    if bookmark_value:
+        current_start = singer.utils.strptime_to_utc(bookmark_value).replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        current_start = singer.utils.strptime_to_utc(start_date).replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # Ensure timezone-naive for comparison
+    if hasattr(current_start, 'tzinfo') and current_start.tzinfo is not None:
+        current_start = current_start.replace(tzinfo=None)
+    
+    current_date = datetime.now()
+    page_size = 100
+
+    with metrics.record_counter(
+        "usage_events",
+    ) as counter:
+        # Iterate through 30-day chunks
+        while current_start < current_date:
+            chunk_end = min(current_start + timedelta(days=29), current_date)
+            
+            logger.info(f"Fetching usage events from {current_start} to {chunk_end}")
+            
+            epoch_start_time = int(current_start.timestamp() * 1000)
+            epoch_end_time = int(chunk_end.timestamp() * 1000)
+            
+            # Handle pagination within each chunk
+            page = 1
+            has_next_page = True
+            
+            while has_next_page:
+                body = {
+                    "startDate": epoch_start_time,
+                    "endDate": epoch_end_time,
+                    "page": page,
+                    "pageSize": page_size
+                }
+                
+                logger.info(f"Fetching page {page}")
+                response = authed_post("usage_events", f"{BASE_URL}/teams/filtered-usage-events", body)
+                
+                if response.status_code != 200:
+                    logger.error(f"Failed to fetch usage events: {response.status_code} - {response.text}")
+                    has_next_page = False
+                    continue
+                
+                response_data = response.json()
+                usage_events = response_data.get("usageEvents", [])
+                pagination = response_data.get("pagination", {})
+                has_next_page = pagination.get("hasNextPage", False)
+                extraction_time = singer.utils.now()
+                
+                for usage_event in usage_events:
+                    # Add inserted_at timestamp
+                    usage_event['inserted_at'] = singer.utils.strftime(extraction_time)
+                    try:
+                        with singer.Transformer() as transformer:
+                            rec = transformer.transform(
+                                usage_event,
+                                schema,
+                                metadata=metadata.to_map(mdata),
+                            )
+                    except:
+                        logger.exception(f"Failed to transform record [{usage_event}]")
+                        raise
+                    singer.write_record(
+                        "usage_events", rec, time_extracted=extraction_time
+                    )
+                    counter.increment()
+                
+                page += 1
+            
+            # Move to next chunk
+            current_start = chunk_end
+            
+        # Update bookmark after processing all events
+        singer.write_bookmark(
+            state,
+            "usage_events",
+            "since",
+            singer.utils.strftime(singer.utils.now()),
+        )
         return state
 
 
@@ -317,6 +403,7 @@ def do_sync(config, state, catalog):
 
 SYNC_FUNCTIONS = {
     "daily_usage": get_daily_usage,
+    "usage_events": get_usage_events,
 }
 
 @singer.utils.handle_top_exception(logger)
