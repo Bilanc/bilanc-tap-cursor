@@ -1,0 +1,117 @@
+{
+    "type": "object",
+    "properties": {
+      "timestamp": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "model": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "kind": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "maxMode": {
+        "type": [
+          "boolean",
+          "null"
+        ]
+      },
+      "requestsCosts": {
+        "type": [
+          "number",
+          "null"
+        ]
+      },
+      "isTokenBasedCall": {
+        "type": [
+          "boolean",
+          "null"
+        ]
+      },
+      "tokenUsage": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "inputTokens": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "outputTokens": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cacheWriteTokens": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cacheReadTokens": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "totalCents": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        }
+      },
+      "cursorTokenFee": {
+        "type": [
+          "number",
+          "null"
+        ]
+      },
+      "isFreeBugbot": {
+        "type": [
+          "boolean",
+          "null"
+        ]
+      },
+      "isChargeable": {
+        "type": [
+          "boolean",
+          "null"
+        ]
+      },
+      "isHeadless": {
+        "type": [
+          "boolean",
+          "null"
+        ]
+      },
+      "userEmail": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "format": "email"
+      },
+      "inserted_at": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "format": "date-time"
+      }
+    }
+}
