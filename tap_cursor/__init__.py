@@ -293,6 +293,10 @@ def get_usage_events(schema, state, mdata, start_date):
                 extraction_time = singer.utils.now()
                 
                 for usage_event in usage_events:
+                    # Skip records without userEmail (required for primary key)
+                    if 'userEmail' not in usage_event or usage_event['userEmail'] is None:
+                        logger.debug(f"Skipping usage event without userEmail: {usage_event.get('timestamp')}")
+                        continue
                     # Add inserted_at timestamp
                     usage_event['inserted_at'] = singer.utils.strftime(extraction_time)
                     try:
