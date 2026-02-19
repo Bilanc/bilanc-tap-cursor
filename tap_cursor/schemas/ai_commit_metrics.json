@@ -1,0 +1,115 @@
+{
+    "type": "object",
+    "properties": {
+      "commitHash": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "userId": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "userEmail": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "format": "email"
+      },
+      "repoName": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "branchName": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "isPrimaryBranch": {
+        "type": [
+          "boolean",
+          "null"
+        ]
+      },
+      "totalLinesAdded": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "totalLinesDeleted": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "tabLinesAdded": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "tabLinesDeleted": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "composerLinesAdded": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "composerLinesDeleted": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "nonAiLinesAdded": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "nonAiLinesDeleted": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "message": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "commitTs": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "createdAt": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "inserted_at": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "format": "date-time"
+      }
+    }
+}
