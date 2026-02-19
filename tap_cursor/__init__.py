@@ -20,6 +20,7 @@ REQUIRED_CONFIG_KEYS = ["start_date"]
 KEY_PROPERTIES = {
     "daily_usage": ["date", "email"],
     "usage_events": ["timestamp", "userEmail"],
+    "ai_commit_metrics": ["commitHash", "createdAt"],
 }
 
 SUB_STREAMS = {}
@@ -162,6 +163,26 @@ def authed_post(source, url, body, headers={}):
         timer.tags[metrics.Tag.http_status_code] = resp.status_code
         if resp.status_code in [404, 409]:
             resp._content = b"{}"  # pylint: disable=protected-access
+        return resp
+
+
+def authed_get(source, url, params=None):
+    """
+    Make a GET request with Basic Auth (API key as username, empty password).
+    Used for the AI Code Tracking API endpoints.
+    """
+    api_key = session.headers.get("Authorization", "").replace("Bearer ", "")
+    with metrics.http_request_timer(source) as timer:
+        logger.info("Making GET request to %s", url)
+        resp = session.request(
+            method="get",
+            url=url,
+            params=params,
+            auth=(api_key, ""),
+            timeout=get_request_timeout(),
+        )
+        logger.info("Request received status code %s", resp.status_code)
+        timer.tags[metrics.Tag.http_status_code] = resp.status_code
         return resp
 
 
@@ -329,6 +350,113 @@ def get_usage_events(schema, state, mdata, start_date):
         return state
 
 
+def get_ai_commit_metrics(schema, state, mdata, start_date):
+    """
+    Fetch AI commit metrics from the Cursor AI Code Tracking API.
+    Uses GET with Basic Auth and page-based pagination.
+    Enterprise-only endpoint — gracefully skips if not available.
+    """
+    bookmark_value = get_bookmark(
+        state, "ai_commit_metrics", "since", start_date
+    )
+    if bookmark_value:
+        current_start = singer.utils.strptime_to_utc(bookmark_value).replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        current_start = singer.utils.strptime_to_utc(start_date).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # Ensure timezone-naive for comparison
+    if hasattr(current_start, 'tzinfo') and current_start.tzinfo is not None:
+        current_start = current_start.replace(tzinfo=None)
+
+    current_date = datetime.now()
+    page_size = 500
+
+    with metrics.record_counter(
+        "ai_commit_metrics",
+    ) as counter:
+        # Iterate through 30-day chunks
+        while current_start < current_date:
+            chunk_end = min(current_start + timedelta(days=29), current_date)
+
+            logger.info(f"Fetching AI commit metrics from {current_start} to {chunk_end}")
+
+            start_date_str = current_start.strftime("%Y-%m-%d")
+            end_date_str = chunk_end.strftime("%Y-%m-%d")
+
+            # Handle pagination within each chunk
+            page = 1
+            has_more = True
+
+            while has_more:
+                params = {
+                    "startDate": start_date_str,
+                    "endDate": end_date_str,
+                    "page": page,
+                    "pageSize": page_size,
+                }
+
+                logger.info(f"Fetching page {page}")
+                response = authed_get("ai_commit_metrics", f"{BASE_URL}/analytics/ai-code/commits", params)
+
+                if response.status_code in [401, 403]:
+                    resp_json = response.json()
+                    if "enterprise" in resp_json.get("message", "").lower():
+                        logger.warning(
+                            "AI commit metrics endpoint requires an enterprise API key. "
+                            "Skipping this stream. Response: %s", resp_json.get("message")
+                        )
+                        return state
+                    logger.error(f"Auth error from AI commit metrics: {response.status_code} - {response.text}")
+                    return state
+
+                if response.status_code != 200:
+                    logger.error(f"Failed to fetch AI commit metrics: {response.status_code} - {response.text}")
+                    has_more = False
+                    continue
+
+                response_data = response.json()
+                items = response_data.get("items", [])
+                total_count = response_data.get("totalCount", 0)
+                extraction_time = singer.utils.now()
+
+                for item in items:
+                    # Add inserted_at timestamp
+                    item['inserted_at'] = singer.utils.strftime(extraction_time)
+                    try:
+                        with singer.Transformer() as transformer:
+                            rec = transformer.transform(
+                                item,
+                                schema,
+                                metadata=metadata.to_map(mdata),
+                            )
+                    except:
+                        logger.exception(f"Failed to transform record [{item}]")
+                        raise
+                    singer.write_record(
+                        "ai_commit_metrics", rec, time_extracted=extraction_time
+                    )
+                    counter.increment()
+
+                # Check if there are more pages
+                if page * page_size >= total_count:
+                    has_more = False
+                else:
+                    page += 1
+
+            # Move to next chunk
+            current_start = chunk_end
+
+        # Only update bookmark if records were actually processed
+        if counter.value > 0:
+            singer.write_bookmark(
+                state,
+                "ai_commit_metrics",
+                "since",
+                singer.utils.strftime(singer.utils.now()),
+            )
+        return state
+
+
 def do_discover(config):
     catalog = get_catalog()
     # dump catalog
@@ -408,6 +536,7 @@ def do_sync(config, state, catalog):
 SYNC_FUNCTIONS = {
     "daily_usage": get_daily_usage,
     "usage_events": get_usage_events,
+    "ai_commit_metrics": get_ai_commit_metrics,
 }
 
 @singer.utils.handle_top_exception(logger)
@@ -433,7 +562,12 @@ def main():
     if args.discover:
         do_discover(args.config)
     else:
-        catalog = args.properties if args.properties else get_catalog()
+        if args.properties:
+            catalog = args.properties
+        elif args.catalog:
+            catalog = args.catalog.to_dict()
+        else:
+            catalog = get_catalog()
 
         do_sync(args.config, args.state, catalog)
 
