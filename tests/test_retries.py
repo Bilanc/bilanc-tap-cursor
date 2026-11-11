@@ -69,6 +69,19 @@ class RetryTest(unittest.TestCase):
         self.assertEqual([json.loads(r.body)["page"] for r in api.request_history], [1, 2, 2])
         self.assertEqual(json.loads(api.request_history[0].body)["pageSize"], 1000)
 
+    def test_bookmark_is_taken_before_the_sync_so_a_slow_run_leaves_no_gap(self):
+        retried_at = []
+        self.sleep.side_effect = lambda _: retried_at.append(tap_cursor.singer.utils.now())
+        with requests_mock.Mocker() as api:
+            api.post(USAGE_EVENTS_URL, [
+                RATE_LIMITED,
+                usage_events_page(["1"], has_next_page=False),
+            ])
+            state = self.sync_usage_events({})
+
+        bookmark = tap_cursor.singer.utils.strptime_to_utc(state["bookmarks"]["usage_events"]["since"])
+        self.assertLess(bookmark, retried_at[0])
+
     def test_server_error_backs_off_then_recovers(self):
         with requests_mock.Mocker() as api:
             api.post(USAGE_EVENTS_URL, [

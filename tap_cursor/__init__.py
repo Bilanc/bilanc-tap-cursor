@@ -238,6 +238,10 @@ def get_daily_usage(schema, state, mdata, start_date):
         current_start = current_start.replace(tzinfo=None)
     
     current_date = datetime.now()
+    # The bookmark is where this sync's range ended, not when the sync finished:
+    # retries can carry a run past midnight, and the next run starts from the
+    # bookmark's day.
+    synced_until = singer.utils.strftime(singer.utils.now())
 
     with metrics.record_counter(
         "daily_usage",
@@ -283,7 +287,7 @@ def get_daily_usage(schema, state, mdata, start_date):
                     state,
                     "daily_usage",
                     "since",
-                    singer.utils.strftime(extraction_time),
+                    synced_until,
                 )
                 counter.increment()
             
@@ -311,6 +315,7 @@ def get_usage_events(schema, state, mdata, start_date):
         current_start = current_start.replace(tzinfo=None)
     
     current_date = datetime.now()
+    synced_until = singer.utils.strftime(singer.utils.now())
     page_size = 1000
 
     with metrics.record_counter(
@@ -383,7 +388,7 @@ def get_usage_events(schema, state, mdata, start_date):
             state,
             "usage_events",
             "since",
-            singer.utils.strftime(singer.utils.now()),
+            synced_until,
         )
         return state
 
@@ -407,6 +412,7 @@ def get_ai_commit_metrics(schema, state, mdata, start_date):
         current_start = current_start.replace(tzinfo=None)
 
     current_date = datetime.now()
+    synced_until = singer.utils.strftime(singer.utils.now())
     page_size = 500
 
     with metrics.record_counter(
@@ -490,7 +496,7 @@ def get_ai_commit_metrics(schema, state, mdata, start_date):
                 state,
                 "ai_commit_metrics",
                 "since",
-                singer.utils.strftime(singer.utils.now()),
+                synced_until,
             )
         return state
 
