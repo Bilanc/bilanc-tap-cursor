@@ -4,6 +4,7 @@ import collections
 import requests
 import singer
 import argparse
+import time
 from singer import bookmarks, metrics, metadata
 from datetime import datetime, timedelta
 
@@ -14,6 +15,11 @@ BASE_URL: str = "https://api.cursor.com"
 
 # set default timeout of 300 seconds
 REQUEST_TIMEOUT = 300
+
+# Cursor answers 429 with a Retry-After header once a team goes over an
+# endpoint's per-minute limit, so a request is repeated rather than given up on.
+MAX_REQUEST_ATTEMPTS = 6
+MAX_RETRY_WAIT_SECONDS = 120
 
 REQUIRED_CONFIG_KEYS = ["start_date"]
 
@@ -151,19 +157,55 @@ def get_request_timeout():
     return REQUEST_TIMEOUT
 
 
+def is_retryable(status_code):
+    return status_code == 429 or status_code >= 500
+
+
+def get_retry_wait(resp, attempt):
+    """
+    Seconds to wait before repeating a request: what Cursor asked for in
+    Retry-After, otherwise 5s doubling with each attempt.
+    """
+    try:
+        wait = float(resp.headers.get("Retry-After"))
+    except (TypeError, ValueError):
+        wait = 5 * 2 ** (attempt - 1)
+    return min(max(wait, 0), MAX_RETRY_WAIT_SECONDS)
+
+
+def request_with_retry(source, **request_kwargs):
+    """
+    Make a request, repeating it while Cursor rate limits it or fails with a
+    server error. Returns the last response once it succeeds, fails with an
+    error that a retry cannot fix, or the attempts run out.
+    """
+    for attempt in range(1, MAX_REQUEST_ATTEMPTS + 1):
+        with metrics.http_request_timer(source) as timer:
+            resp = session.request(timeout=get_request_timeout(), **request_kwargs)
+            logger.info("Request received status code %s", resp.status_code)
+            timer.tags[metrics.Tag.http_status_code] = resp.status_code
+
+        if not is_retryable(resp.status_code) or attempt == MAX_REQUEST_ATTEMPTS:
+            return resp
+
+        wait = get_retry_wait(resp, attempt)
+        logger.warning(
+            "%s request got %s, retrying in %ss (attempt %s of %s)",
+            source, resp.status_code, wait, attempt, MAX_REQUEST_ATTEMPTS,
+        )
+        time.sleep(wait)
+
+
 def authed_post(source, url, body, headers={}):
     """
     Make a POST request with JSON body.
     """
-    with metrics.http_request_timer(source) as timer:
-        session.headers.update(headers)
-        logger.info("Making POST request to %s", url)
-        resp = session.request(method="post", json=body, url=url, timeout=get_request_timeout())
-        logger.info("Request received status code %s", resp.status_code)
-        timer.tags[metrics.Tag.http_status_code] = resp.status_code
-        if resp.status_code in [404, 409]:
-            resp._content = b"{}"  # pylint: disable=protected-access
-        return resp
+    session.headers.update(headers)
+    logger.info("Making POST request to %s", url)
+    resp = request_with_retry(source, method="post", json=body, url=url)
+    if resp.status_code in [404, 409]:
+        resp._content = b"{}"  # pylint: disable=protected-access
+    return resp
 
 
 def authed_get(source, url, params=None):
@@ -172,18 +214,14 @@ def authed_get(source, url, params=None):
     Used for the AI Code Tracking API endpoints.
     """
     api_key = session.headers.get("Authorization", "").replace("Bearer ", "")
-    with metrics.http_request_timer(source) as timer:
-        logger.info("Making GET request to %s", url)
-        resp = session.request(
-            method="get",
-            url=url,
-            params=params,
-            auth=(api_key, ""),
-            timeout=get_request_timeout(),
-        )
-        logger.info("Request received status code %s", resp.status_code)
-        timer.tags[metrics.Tag.http_status_code] = resp.status_code
-        return resp
+    logger.info("Making GET request to %s", url)
+    return request_with_retry(
+        source,
+        method="get",
+        url=url,
+        params=params,
+        auth=(api_key, ""),
+    )
 
 
 def get_daily_usage(schema, state, mdata, start_date):
@@ -218,9 +256,9 @@ def get_daily_usage(schema, state, mdata, start_date):
             response = authed_post("daily_usage", f"{BASE_URL}/teams/daily-usage-data", body)
             
             if response.status_code != 200:
-                logger.error(f"Failed to fetch daily usage: {response.status_code}")
-                current_start = chunk_end
-                continue
+                raise CursorException(
+                    f"Failed to fetch daily usage: {response.status_code} - {response.text}"
+                )
                 
             daily_usages = response.json().get("data", [])
             extraction_time = singer.utils.now()
@@ -273,7 +311,7 @@ def get_usage_events(schema, state, mdata, start_date):
         current_start = current_start.replace(tzinfo=None)
     
     current_date = datetime.now()
-    page_size = 100
+    page_size = 1000
 
     with metrics.record_counter(
         "usage_events",
@@ -303,9 +341,9 @@ def get_usage_events(schema, state, mdata, start_date):
                 response = authed_post("usage_events", f"{BASE_URL}/teams/filtered-usage-events", body)
                 
                 if response.status_code != 200:
-                    logger.error(f"Failed to fetch usage events: {response.status_code} - {response.text}")
-                    has_next_page = False
-                    continue
+                    raise CursorException(
+                        f"Failed to fetch usage events: {response.status_code} - {response.text}"
+                    )
                 
                 response_data = response.json()
                 usage_events = response_data.get("usageEvents", [])
@@ -410,9 +448,9 @@ def get_ai_commit_metrics(schema, state, mdata, start_date):
                     return state
 
                 if response.status_code != 200:
-                    logger.error(f"Failed to fetch AI commit metrics: {response.status_code} - {response.text}")
-                    has_more = False
-                    continue
+                    raise CursorException(
+                        f"Failed to fetch AI commit metrics: {response.status_code} - {response.text}"
+                    )
 
                 response_data = response.json()
                 items = response_data.get("items", [])
