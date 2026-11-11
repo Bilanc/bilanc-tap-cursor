@@ -1,5 +1,6 @@
 import json
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 import requests_mock
@@ -69,18 +70,33 @@ class RetryTest(unittest.TestCase):
         self.assertEqual([json.loads(r.body)["page"] for r in api.request_history], [1, 2, 2])
         self.assertEqual(json.loads(api.request_history[0].body)["pageSize"], 1000)
 
-    def test_bookmark_is_taken_before_the_sync_so_a_slow_run_leaves_no_gap(self):
-        retried_at = []
-        self.sleep.side_effect = lambda _: retried_at.append(tap_cursor.singer.utils.now())
-        with requests_mock.Mocker() as api:
-            api.post(USAGE_EVENTS_URL, [
-                RATE_LIMITED,
+    def test_sync_that_retries_past_midnight_leaves_no_gap_for_the_next_run(self):
+        clock = [datetime(2026, 11, 10, 23, 58, tzinfo=timezone.utc)]
+
+        class Clock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return clock[0].replace(tzinfo=None)
+
+        def sleep(seconds):
+            clock[0] += timedelta(seconds=seconds)
+
+        self.sleep.side_effect = sleep
+        self.start_date = "2026-11-10T00:00:00Z"
+        with mock.patch.object(tap_cursor, "datetime", Clock), \
+                mock.patch.object(tap_cursor.singer.utils, "now", lambda: clock[0]), \
+                requests_mock.Mocker() as api:
+            api.post(USAGE_EVENTS_URL, [RATE_LIMITED] * 5 + [
                 usage_events_page(["1"], has_next_page=False),
             ])
             state = self.sync_usage_events({})
+            self.assertEqual(clock[0].day, 11)
+            first_sync_end = json.loads(api.last_request.body)["endDate"]
 
-        bookmark = tap_cursor.singer.utils.strptime_to_utc(state["bookmarks"]["usage_events"]["since"])
-        self.assertLess(bookmark, retried_at[0])
+            self.sync_usage_events(state)
+            next_sync_start = json.loads(api.last_request.body)["startDate"]
+
+        self.assertLessEqual(next_sync_start, first_sync_end)
 
     def test_server_error_backs_off_then_recovers(self):
         with requests_mock.Mocker() as api:
