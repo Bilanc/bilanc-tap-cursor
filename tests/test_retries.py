@@ -19,12 +19,12 @@ RATE_LIMITED = {
 SERVER_ERROR = {"status_code": 500, "json": {"code": "internal"}}
 
 
-def usage_events_page(timestamps, has_next_page):
+def usage_events_page(timestamps, has_next_page, user_email="dev@example.com"):
     return {
         "status_code": 200,
         "json": {
             "usageEvents": [
-                {"timestamp": timestamp, "userEmail": "dev@example.com"}
+                {"timestamp": timestamp, "userEmail": user_email}
                 for timestamp in timestamps
             ],
             "pagination": {"hasNextPage": has_next_page},
@@ -54,6 +54,26 @@ class RetryTest(unittest.TestCase):
 
     def sync_usage_events(self, state):
         return tap_cursor.get_usage_events(self.schema, state, [], self.start_date)
+
+    def test_events_without_a_user_are_skipped_whatever_the_blank_looks_like(self):
+        with requests_mock.Mocker() as api:
+            api.post(USAGE_EVENTS_URL, [{
+                "status_code": 200,
+                "json": {
+                    "usageEvents": [
+                        {"timestamp": "1", "userEmail": "dev@example.com"},
+                        {"timestamp": "2", "userEmail": ""},
+                        {"timestamp": "3", "userEmail": "   "},
+                        {"timestamp": "4", "userEmail": None},
+                        {"timestamp": "5", "model": "grok-bot-default"},
+                    ],
+                    "pagination": {"hasNextPage": False},
+                },
+            }])
+            self.sync_usage_events({})
+
+        self.assertEqual(self.write_record.call_count, 1)
+        self.assertEqual(self.write_record.call_args.args[1]["userEmail"], "dev@example.com")
 
     def test_rate_limited_page_is_retried_after_the_wait_cursor_asks_for(self):
         with requests_mock.Mocker() as api:
