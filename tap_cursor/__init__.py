@@ -357,8 +357,9 @@ def get_usage_events(schema, state, mdata, start_date):
                 extraction_time = singer.utils.now()
                 
                 for usage_event in usage_events:
-                    # Skip records without userEmail (required for primary key)
-                    if 'userEmail' not in usage_event or usage_event['userEmail'] is None:
+                    # userEmail is part of the primary key; bot/automation events
+                    # (e.g. Bugbot) come back without a user, as None or "".
+                    if not (usage_event.get('userEmail') or '').strip():
                         logger.debug(f"Skipping usage event without userEmail: {usage_event.get('timestamp')}")
                         continue
                     # Add inserted_at timestamp
